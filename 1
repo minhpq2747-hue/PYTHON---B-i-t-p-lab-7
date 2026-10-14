@@ -1,0 +1,585 @@
+import json
+import os
+from datetime import datetime
+
+PRODUCTS_FILE = "products.json"
+ORDERS_FILE = "orders.json"
+
+
+def format_money(value):
+    return f"{value:,.0f}".replace(",", ".") + " đ"
+
+
+def validate_price(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("Giá bán phải là một số.")
+    if value < 0:
+        raise ValueError("Giá bán không được âm.")
+    return value
+
+
+def validate_quantity(value):
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("Số lượng phải là số nguyên.")
+    if value < 0:
+        raise ValueError("Số lượng tồn kho không được âm.")
+    return value
+
+
+def validate_date(text):
+    try:
+        datetime.strptime(text, "%Y-%m-%d")
+    except (ValueError, TypeError):
+        raise ValueError("Ngày hết hạn phải có định dạng YYYY-MM-DD hợp lệ.")
+    return text
+
+
+class Product:
+    type_name = "Product"
+
+    def __init__(self, id, name, price, quantity):
+        self.id = id
+        self.name = name
+        self.price = price
+        self.quantity = quantity
+
+    @property
+    def price(self):
+        return self._price
+
+    @price.setter
+    def price(self, value):
+        self._price = validate_price(value)
+
+    @property
+    def quantity(self):
+        return self._quantity
+
+    @quantity.setter
+    def quantity(self, value):
+        self._quantity = validate_quantity(value)
+
+    def display_info(self):
+        print(
+            f"[{self.id}] {self.name} | Giá: {format_money(self.price)} "
+            f"| Tồn kho: {self.quantity}"
+        )
+
+    def calculate_value(self):
+        return self.price * self.quantity
+
+    def edit_extra(self):
+        pass
+
+    def to_dict(self):
+        return {
+            "type": self.type_name,
+            "id": self.id,
+            "name": self.name,
+            "price": self.price,
+            "quantity": self.quantity,
+        }
+
+    @classmethod
+    def from_dict(cls, data):
+        return cls(data["id"], data["name"], data["price"], data["quantity"])
+
+
+class Electronic(Product):
+    type_name = "Electronic"
+
+    def __init__(self, id, name, price, quantity, warranty_months):
+        super().__init__(id, name, price, quantity)
+        self.warranty_months = warranty_months
+
+    @property
+    def warranty_months(self):
+        return self._warranty_months
+
+    @warranty_months.setter
+    def warranty_months(self, value):
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError("Thời gian bảo hành phải là số nguyên không âm.")
+        self._warranty_months = value
+
+    def display_info(self):
+        super().display_info()
+        print(f"    Loại: Điện tử | Bảo hành: {self.warranty_months} tháng")
+
+    def edit_extra(self):
+        self.warranty_months = ask_int(
+            "Bảo hành (tháng)", 0, default=self.warranty_months
+        )
+
+    def to_dict(self):
+        data = super().to_dict()
+        data["warranty_months"] = self.warranty_months
+        return data
+
+    @classmethod
+    def from_dict(cls, data):
+        return cls(
+            data["id"],
+            data["name"],
+            data["price"],
+            data["quantity"],
+            data["warranty_months"],
+        )
+
+
+class Food(Product):
+    type_name = "Food"
+
+    def __init__(self, id, name, price, quantity, expiry_date):
+        super().__init__(id, name, price, quantity)
+        self.expiry_date = expiry_date
+
+    @property
+    def expiry_date(self):
+        return self._expiry_date
+
+    @expiry_date.setter
+    def expiry_date(self, value):
+        self._expiry_date = validate_date(value)
+
+    def display_info(self):
+        super().display_info()
+        print(f"    Loại: Thực phẩm | Hết hạn: {self.expiry_date}")
+
+    def edit_extra(self):
+        self.expiry_date = ask_date("Ngày hết hạn (YYYY-MM-DD)", default=self.expiry_date)
+
+    def to_dict(self):
+        data = super().to_dict()
+        data["expiry_date"] = self.expiry_date
+        return data
+
+    @classmethod
+    def from_dict(cls, data):
+        return cls(
+            data["id"],
+            data["name"],
+            data["price"],
+            data["quantity"],
+            data["expiry_date"],
+        )
+
+
+PRODUCT_TYPES = {
+    "Product": Product,
+    "Electronic": Electronic,
+    "Food": Food,
+}
+
+
+def ask_text(label, default=None):
+    while True:
+        suffix = f" [{default}]" if default is not None else ""
+        text = input(f"{label}{suffix}: ").strip()
+        if text:
+            return text
+        if default is not None:
+            return default
+        print("Lỗi: Không được để trống.")
+
+
+def ask_price(label, default=None):
+    while True:
+        suffix = f" [{default}]" if default is not None else ""
+        text = input(f"{label}{suffix}: ").strip()
+        if not text and default is not None:
+            return default
+        try:
+            return validate_price(float(text))
+        except ValueError as error:
+            message = str(error)
+            if "could not convert" in message:
+                message = "Giá bán phải là một số."
+            print("Lỗi:", message)
+
+
+def ask_int(label, minimum=0, default=None):
+    while True:
+        suffix = f" [{default}]" if default is not None else ""
+        text = input(f"{label}{suffix}: ").strip()
+        if not text and default is not None:
+            return default
+        try:
+            value = int(text)
+        except ValueError:
+            print("Lỗi: Vui lòng nhập số nguyên.")
+            continue
+        if value < minimum:
+            print(f"Lỗi: Giá trị không được nhỏ hơn {minimum}.")
+            continue
+        return value
+
+
+def ask_date(label, default=None):
+    while True:
+        suffix = f" [{default}]" if default is not None else ""
+        text = input(f"{label}{suffix}: ").strip()
+        if not text and default is not None:
+            return default
+        try:
+            return validate_date(text)
+        except ValueError as error:
+            print("Lỗi:", error)
+
+
+def confirm(message):
+    return input(f"{message} (y/n): ").strip().lower() in ("y", "yes", "c", "co", "có")
+
+
+def apply_discount_rate(total):
+    if total >= 1_000_000:
+        return 0.10
+    if total >= 500_000:
+        return 0.05
+    return 0.0
+
+
+class Store:
+    def __init__(self):
+        self.products = []
+        self.orders = []
+        self.load()
+
+    def load(self):
+        self.products = self._load_products()
+        self.orders = self._load_orders()
+
+    def _load_products(self):
+        if not os.path.exists(PRODUCTS_FILE):
+            products = [
+                Product("P01", "Bút bi", 5000, 100),
+                Electronic("E01", "Tai nghe", 350000, 3, 12),
+                Electronic("E02", "Chuột không dây", 250000, 20, 6),
+                Food("F01", "Bánh quy", 45000, 4, "2027-01-31"),
+                Food("F02", "Sữa tươi", 32000, 50, "2026-12-31"),
+            ]
+            self.products = products
+            self.save_products()
+            return products
+        try:
+            with open(PRODUCTS_FILE, "r", encoding="utf-8") as file:
+                raw = json.load(file)
+            products = []
+            for item in raw:
+                cls = PRODUCT_TYPES.get(item.get("type", "Product"), Product)
+                products.append(cls.from_dict(item))
+            return products
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as error:
+            print(f"Lỗi khi đọc file {PRODUCTS_FILE}: {error}")
+            return []
+
+    def _load_orders(self):
+        if not os.path.exists(ORDERS_FILE):
+            return []
+        try:
+            with open(ORDERS_FILE, "r", encoding="utf-8") as file:
+                data = json.load(file)
+            if not isinstance(data, list):
+                raise ValueError("Dữ liệu đơn hàng không hợp lệ.")
+            return data
+        except (OSError, json.JSONDecodeError, ValueError) as error:
+            print(f"Lỗi khi đọc file {ORDERS_FILE}: {error}")
+            return []
+
+    def save_products(self):
+        try:
+            with open(PRODUCTS_FILE, "w", encoding="utf-8") as file:
+                json.dump(
+                    [p.to_dict() for p in self.products],
+                    file,
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            return True
+        except OSError as error:
+            print(f"Lỗi khi ghi file {PRODUCTS_FILE}: {error}")
+            return False
+
+    def save_orders(self):
+        try:
+            with open(ORDERS_FILE, "w", encoding="utf-8") as file:
+                json.dump(self.orders, file, ensure_ascii=False, indent=2)
+            return True
+        except OSError as error:
+            print(f"Lỗi khi ghi file {ORDERS_FILE}: {error}")
+            return False
+
+    def find_by_id(self, product_id):
+        for product in self.products:
+            if product.id.lower() == product_id.lower():
+                return product
+        return None
+
+    def search(self, keyword):
+        keyword = keyword.lower()
+        return [
+            p
+            for p in self.products
+            if keyword in p.id.lower() or keyword in p.name.lower()
+        ]
+
+    def next_order_id(self):
+        numbers = []
+        for order in self.orders:
+            code = str(order.get("order_id", ""))
+            if code.startswith("DH") and code[2:].isdigit():
+                numbers.append(int(code[2:]))
+        return f"DH{(max(numbers) + 1 if numbers else 1):04d}"
+
+
+def show_products(store):
+    if not store.products:
+        print("Danh sách sản phẩm trống.")
+        return
+    print("\n--- DANH SÁCH SẢN PHẨM ---")
+    for product in store.products:
+        product.display_info()
+
+
+def add_product(store):
+    print("\n--- THÊM SẢN PHẨM ---")
+    while True:
+        product_id = ask_text("Mã sản phẩm")
+        if store.find_by_id(product_id):
+            print("Lỗi: Mã sản phẩm đã tồn tại.")
+        else:
+            break
+    name = ask_text("Tên sản phẩm")
+    price = ask_price("Giá bán")
+    quantity = ask_int("Số lượng tồn kho", 0)
+    print("Loại sản phẩm: 1. Thường  2. Điện tử  3. Thực phẩm")
+    while True:
+        kind = input("Chọn loại: ").strip()
+        if kind in ("1", "2", "3"):
+            break
+        print("Lỗi: Lựa chọn không hợp lệ.")
+    if kind == "2":
+        warranty = ask_int("Bảo hành (tháng)", 0)
+        product = Electronic(product_id, name, price, quantity, warranty)
+    elif kind == "3":
+        expiry = ask_date("Ngày hết hạn (YYYY-MM-DD)")
+        product = Food(product_id, name, price, quantity, expiry)
+    else:
+        product = Product(product_id, name, price, quantity)
+    store.products.append(product)
+    if store.save_products():
+        print("Đã thêm sản phẩm thành công.")
+
+
+def search_product(store):
+    print("\n--- TÌM KIẾM SẢN PHẨM ---")
+    keyword = ask_text("Nhập mã hoặc tên sản phẩm")
+    results = store.search(keyword)
+    if not results:
+        print("Không tìm thấy sản phẩm phù hợp.")
+        return
+    print(f"Tìm thấy {len(results)} sản phẩm:")
+    for product in results:
+        product.display_info()
+
+
+def update_product(store):
+    print("\n--- CẬP NHẬT SẢN PHẨM ---")
+    product = store.find_by_id(ask_text("Nhập mã sản phẩm cần cập nhật"))
+    if not product:
+        print("Lỗi: Mã sản phẩm không tồn tại.")
+        return
+    product.display_info()
+    print("(Nhấn Enter để giữ nguyên giá trị hiện tại)")
+    product.name = ask_text("Tên sản phẩm", product.name)
+    product.price = ask_price("Giá bán", product.price)
+    product.quantity = ask_int("Số lượng tồn kho", 0, product.quantity)
+    product.edit_extra()
+    if store.save_products():
+        print("Đã cập nhật sản phẩm thành công.")
+
+
+def delete_product(store):
+    print("\n--- XÓA SẢN PHẨM ---")
+    product = store.find_by_id(ask_text("Nhập mã sản phẩm cần xóa"))
+    if not product:
+        print("Lỗi: Mã sản phẩm không tồn tại.")
+        return
+    product.display_info()
+    if confirm("Bạn có chắc chắn muốn xóa"):
+        store.products.remove(product)
+        if store.save_products():
+            print("Đã xóa sản phẩm.")
+    else:
+        print("Đã hủy thao tác xóa.")
+
+
+def sell(store):
+    print("\n--- BÁN HÀNG ---")
+    if not store.products:
+        print("Cửa hàng chưa có sản phẩm.")
+        return
+    cart = {}
+    while True:
+        product_id = input("Nhập mã sản phẩm (Enter để kết thúc chọn hàng): ").strip()
+        if not product_id:
+            break
+        product = store.find_by_id(product_id)
+        if not product:
+            print("Lỗi: Mã sản phẩm không tồn tại.")
+            continue
+        available = product.quantity - cart.get(product.id, 0)
+        try:
+            quantity = int(input(f"Nhập số lượng mua (còn {available}): ").strip())
+        except ValueError:
+            print("Lỗi: Số lượng phải là số nguyên.")
+            continue
+        if quantity <= 0:
+            print("Lỗi: Số lượng mua phải lớn hơn 0.")
+            continue
+        if quantity > available:
+            print(f"Lỗi: Số lượng mua vượt quá tồn kho (còn {available}).")
+            continue
+        cart[product.id] = cart.get(product.id, 0) + quantity
+        print(f"Đã thêm {quantity} x {product.name} vào đơn hàng.")
+
+    if not cart:
+        print("Đơn hàng trống, hủy bán hàng.")
+        return
+
+    items = []
+    total = 0
+    print("\n===== HÓA ĐƠN =====")
+    for product_id, quantity in cart.items():
+        product = store.find_by_id(product_id)
+        amount = product.price * quantity
+        total += amount
+        items.append(
+            {
+                "id": product.id,
+                "name": product.name,
+                "price": product.price,
+                "quantity": quantity,
+                "amount": amount,
+            }
+        )
+        print(
+            f"{product.id:<6} {product.name:<20} {format_money(product.price):>14} "
+            f"x {quantity:<4} = {format_money(amount):>16}"
+        )
+    rate = apply_discount_rate(total)
+    discount = total * rate
+    payable = total - discount
+    print("-" * 66)
+    print(f"Tổng tiền hàng trước khuyến mại: {format_money(total)}")
+    print(f"Tỷ lệ khuyến mại: {rate * 100:.0f}%")
+    print(f"Số tiền được giảm: {format_money(discount)}")
+    print(f"Số tiền khách phải thanh toán: {format_money(payable)}")
+
+    if not confirm("Xác nhận thanh toán đơn hàng"):
+        print("Đã hủy đơn hàng.")
+        return
+
+    for item in items:
+        product = store.find_by_id(item["id"])
+        product.quantity -= item["quantity"]
+    order = {
+        "order_id": store.next_order_id(),
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "items": items,
+        "total_before_discount": total,
+        "discount_rate": rate,
+        "discount_amount": discount,
+        "final_amount": payable,
+    }
+    store.orders.append(order)
+    saved_products = store.save_products()
+    saved_orders = store.save_orders()
+    if saved_products and saved_orders:
+        print(f"Thanh toán thành công. Mã đơn hàng: {order['order_id']}")
+    else:
+        print("Đơn hàng đã xử lý nhưng có lỗi khi lưu dữ liệu.")
+
+
+def inventory_report(store):
+    print("\n--- BÁO CÁO TỒN KHO ---")
+    if not store.products:
+        print("Cửa hàng chưa có sản phẩm.")
+        return
+    low_stock = [p for p in store.products if p.quantity < 5]
+    print("Sản phẩm có số lượng tồn kho nhỏ hơn 5:")
+    if low_stock:
+        for product in low_stock:
+            product.display_info()
+    else:
+        print("  Không có sản phẩm nào.")
+    total_quantity = sum(p.quantity for p in store.products)
+    total_value = sum(p.calculate_value() for p in store.products)
+    top = max(store.products, key=lambda p: p.calculate_value())
+    print(f"\nTổng số lượng sản phẩm trong kho: {total_quantity}")
+    print(f"Tổng giá trị tồn kho: {format_money(total_value)}")
+    print("Sản phẩm có giá trị tồn kho cao nhất:")
+    top.display_info()
+    print(f"    Giá trị tồn kho: {format_money(top.calculate_value())}")
+
+
+def revenue_report(store):
+    print("\n--- BÁO CÁO DOANH THU ---")
+    count = len(store.orders)
+    revenue = sum(order.get("final_amount", 0) for order in store.orders)
+    average = revenue / count if count else 0
+    print(f"Tổng doanh thu thực thu: {format_money(revenue)}")
+    print(f"Tổng số đơn hàng đã thanh toán: {count}")
+    print(f"Giá trị trung bình mỗi đơn hàng: {format_money(average)}")
+    print("\nDanh sách sản phẩm:")
+    if not store.products:
+        print("  Chưa có sản phẩm.")
+    for product in store.products:
+        product.display_info()
+
+
+def print_menu():
+    print("\n========== QUẢN LÝ CỬA HÀNG ==========")
+    print("1. Hiển thị danh sách sản phẩm")
+    print("2. Thêm sản phẩm mới")
+    print("3. Tìm kiếm sản phẩm theo mã hoặc tên")
+    print("4. Cập nhật thông tin sản phẩm")
+    print("5. Xóa sản phẩm")
+    print("6. Bán hàng")
+    print("7. Báo cáo tồn kho")
+    print("8. Báo cáo doanh thu")
+    print("9. Thoát chương trình")
+
+
+def main():
+    store = Store()
+    actions = {
+        "1": show_products,
+        "2": add_product,
+        "3": search_product,
+        "4": update_product,
+        "5": delete_product,
+        "6": sell,
+        "7": inventory_report,
+        "8": revenue_report,
+    }
+    while True:
+        print_menu()
+        choice = input("Chọn chức năng (1-9): ").strip()
+        if choice == "9":
+            print("Tạm biệt!")
+            break
+        action = actions.get(choice)
+        if action is None:
+            print("Lỗi: Lựa chọn không hợp lệ, vui lòng nhập từ 1 đến 9.")
+            continue
+        try:
+            action(store)
+        except (KeyboardInterrupt, EOFError):
+            print("\nĐã hủy thao tác.")
+        except Exception as error:
+            print(f"Đã xảy ra lỗi: {error}")
+
+
+if __name__ == "__main__":
+    main()
